@@ -1,0 +1,3 @@
+/home/felix/CLionProjects/EmbeddedLinuxProject/cmake-build-debug/CMakeFiles/EmbeddedLinuxProject.dir
+/home/felix/CLionProjects/EmbeddedLinuxProject/cmake-build-debug/CMakeFiles/edit_cache.dir
+/home/felix/CLionProjects/EmbeddedLinuxProject/cmake-build-debug/CMakeFiles/rebuild_cache.dir
