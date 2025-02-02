@@ -75,7 +75,7 @@ int main(void) {
     char mOne[1024] = {}; //for now only sending char with the pipe
     read(vOne, mOne, sizeof(mOne));
     printf("value one received: %s\n", mOne);
-    close(vOne);
+    close(vOne); //testing commit
 
     return 0;
 }
