@@ -1,5 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h> //for pipes
+#include <fcntl.h>
+#include <unistd.h>
+
 
 void read_cpu_temp() {
     FILE *file;
@@ -14,7 +18,20 @@ void read_cpu_temp() {
 
     if (fgets(buffer, sizeof(buffer), file) != NULL) {
         long temp = atol(buffer) / 1000;
-        printf("CPU temperature: %ld C\n", temp);
+        char message[1024];
+        snprintf(message, sizeof(message), "%ld", temp);
+        printf("CPU temperature: %ld C\n", temp);//todo: print message instead of temp?
+        
+        //write pipe
+        const char *pOne = "/tmp/pipeOne";
+        int vOne = open(pOne, O_WRONLY);//todo: | O_NONBLOCK
+        if (vOne == -1){
+            perror("Failed to open pipe one in read_cpu_temp");
+            return;
+        }
+        write(vOne, message, sizeof(message));
+        close(vOne);
+
     } else {
         printf("Error reading file\n");
     }
@@ -27,7 +44,7 @@ void read_cpu_frequency() {
     char *freq_path = "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq";
 
     file = fopen(freq_path, "r");
-    if (file == NULL) {
+    if (file == NULL) {b
         printf("Error opening file\n");
         return;
     }
@@ -42,7 +59,23 @@ void read_cpu_frequency() {
 }
 
 int main(void) {
+    //create pipes
+    const char *pOne = "/tmp/pipeOne";
+    mkfifo(pOne, 0666);
+
     read_cpu_temp();
     read_cpu_frequency();
+
+    //read pipes
+    int vOne = open(pOne, O_RDONLY);//todo: | O_NONBLOCK
+    if (vOne == -1) {
+        perror("Failed to open pipe one in main");
+        return 1;
+    }
+    char mOne[1024] = {}; //for now only sending char with the pipe
+    read(vOne, mOne, sizeof(mOne));
+    printf("value one received: %s\n", mOne);
+    close(vOne);
+
     return 0;
 }
