@@ -24,7 +24,7 @@ void read_cpu_temp() {
         
         //write pipe
         const char *pOne = "/tmp/pipeOne";
-        int vOne = open(pOne, O_WRONLY O_NONBLOCK);//todo: | O_NONBLOCK
+        int vOne = open(pOne, O_WRONLY | O_NONBLOCK);//todo: | O_NONBLOCK
         if (vOne == -1){
             perror("Failed to open pipe one in read_cpu_temp");
             return;
