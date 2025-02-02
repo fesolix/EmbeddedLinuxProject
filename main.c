@@ -24,10 +24,10 @@ void read_cpu_temp() {
         
         //write pipe
         const char *pOne = "/tmp/pipeOne";
-        int vOne = open(pOne, O_WRONLY | O_NONBLOCK);//todo: | O_NONBLOCK
+        int vOne = open(pOne, O_WRONLY);//todo: | O_NONBLOCK
         if (vOne == -1){
             perror("Failed to open pipe one in read_cpu_temp");
-            return;
+            return 1;
         }
         write(vOne, message, sizeof(message));
         close(vOne);
@@ -59,19 +59,20 @@ void read_cpu_frequency() {
 }
 
 int main(void) {
-    //create pipes
+    //create and open pipes
     const char *pOne = "/tmp/pipeOne";
     mkfifo(pOne, 0666);
 
-    read_cpu_temp();
-    read_cpu_frequency();
-
-    //read pipes
     int vOne = open(pOne, O_RDONLY | O_NONBLOCK);//todo: | O_NONBLOCK
     if (vOne == -1) {
         perror("Failed to open pipe one in main");
         return 1;
     }
+
+    read_cpu_temp();
+    read_cpu_frequency();
+
+    //read pipes
     char mOne[1024] = {}; //for now only sending char with the pipe
     read(vOne, mOne, sizeof(mOne));
     printf("value one received: %s\n", mOne);
