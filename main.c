@@ -26,7 +26,7 @@ void read_cpu_temp()
 
         // write pipe
         const char *pOne = "/tmp/pipeOne";
-        int vOne = open(pOne, O_WRONLY); // todo: | O_NONBLOCK
+        int vOne = open(pOne, O_WRONLY);
         if (vOne == -1)
         {
             perror("Failed to open pipe one in read_cpu_temp");
@@ -58,7 +58,20 @@ void read_cpu_frequency()
     if (fgets(buffer, sizeof(buffer), file) != NULL)
     {
         float freq = atol(buffer) / 1000000.0f;
+        char message[1024];
+        snprintf(message, sizeof(message), "%f", freq);
         printf("CPU frequency: %f GHz\n", freq);
+
+        //write pipe
+        const char *pTwo = "/tmp/pipeTwo";
+        int vTwo = open(pTwo, O_WRONLY);
+        if (vTwo == -1)
+        {
+            perror("Failed to open pipe two in read_cpu_frequency");
+            return;
+        }
+        write(vTwo, message, sizeof(message));
+        close(vTwo);
     }
     else
     {
@@ -72,11 +85,19 @@ int main(void)
     // create and open pipes
     const char *pOne = "/tmp/pipeOne";
     mkfifo(pOne, 0666);
-
-    int vOne = open(pOne, O_RDONLY | O_NONBLOCK); // todo: | O_NONBLOCK
+    int vOne = open(pOne, O_RDONLY | O_NONBLOCK);
     if (vOne == -1)
     {
         perror("Failed to open pipe one in main");
+        return 1;
+    }
+
+    const char *pTwo = "/tmp/pipeTwo";
+    mkfifo(pTwo, 0666);
+    int vTwo = open(pTwo, O_RDONLY | O_NONBLOCK);
+    if (vTwo == -1)
+    {
+        perror("Failed to open pipe two in main");
         return 1;
     }
 
@@ -88,6 +109,11 @@ int main(void)
     read(vOne, mOne, sizeof(mOne));
     printf("value one received: %s\n", mOne);
     close(vOne);
+
+    char mTwo[1024] = {};
+    read(vTwo, mTwo, sizeof(mTwo));
+    printf("value two received: %s\n", mTwo);
+    close(vTwo);
 
     return 0;
 }
