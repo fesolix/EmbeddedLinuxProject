@@ -4,67 +4,78 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-
-void read_cpu_temp() {
+void read_cpu_temp()
+{
     FILE *file;
     char buffer[1024];
     char *temp_path = "/sys/class/thermal/thermal_zone0/temp";
 
     file = fopen(temp_path, "r");
-    if (file == NULL) {
+    if (file == NULL)
+    {
         printf("Error opening file\n");
         return;
     }
 
-    if (fgets(buffer, sizeof(buffer), file) != NULL) {
+    if (fgets(buffer, sizeof(buffer), file) != NULL)
+    {
         long temp = atol(buffer) / 1000;
         char message[1024];
         snprintf(message, sizeof(message), "%ld", temp);
-        printf("CPU temperature: %ld C\n", temp);//todo: print message instead of temp?
-        
-        //write pipe
+        printf("CPU temperature: %ld C\n", temp); // todo: print message instead of temp?
+
+        // write pipe
         const char *pOne = "/tmp/pipeOne";
-        int vOne = open(pOne, O_WRONLY);//todo: | O_NONBLOCK
-        if (vOne == -1){
+        int vOne = open(pOne, O_WRONLY); // todo: | O_NONBLOCK
+        if (vOne == -1)
+        {
             perror("Failed to open pipe one in read_cpu_temp");
-            return 1;
+            return;
         }
         write(vOne, message, sizeof(message));
         close(vOne);
-
-    } else {
+    }
+    else
+    {
         printf("Error reading file\n");
     }
     fclose(file);
 }
 
-void read_cpu_frequency() {
+void read_cpu_frequency()
+{
     FILE *file;
     char buffer[1024];
     char *freq_path = "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq";
 
     file = fopen(freq_path, "r");
-    if (file == NULL) {
+    if (file == NULL)
+    {
         printf("Error opening file\n");
         return;
     }
 
-    if (fgets(buffer, sizeof(buffer), file) != NULL) {
+    if (fgets(buffer, sizeof(buffer), file) != NULL)
+    {
         float freq = atol(buffer) / 1000000.0f;
         printf("CPU frequency: %f GHz\n", freq);
-    } else {
+    }
+    else
+    {
         printf("Error reading file\n");
     }
     fclose(file);
 }
 
-int main(void) {
-    //create and open pipes
+int main(void)
+{
+    // create and open pipes
     const char *pOne = "/tmp/pipeOne";
     mkfifo(pOne, 0666);
 
-    int vOne = open(pOne, O_RDONLY | O_NONBLOCK);//todo: | O_NONBLOCK
-    if (vOne == -1) {
+    int vOne = open(pOne, O_RDONLY | O_NONBLOCK); // todo: | O_NONBLOCK
+    if (vOne == -1)
+    {
         perror("Failed to open pipe one in main");
         return 1;
     }
@@ -72,8 +83,8 @@ int main(void) {
     read_cpu_temp();
     read_cpu_frequency();
 
-    //read pipes
-    char mOne[1024] = {}; //for now only sending char with the pipe
+    // read pipes
+    char mOne[1024] = {}; // for now only sending char with the pipe
     read(vOne, mOne, sizeof(mOne));
     printf("value one received: %s\n", mOne);
     close(vOne);
