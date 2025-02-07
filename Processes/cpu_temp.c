@@ -1,50 +1,63 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/stat.h> //for pipes
+#include <sys/stat.h>
 #include <fcntl.h>
+#include <string.h>
 
-void read_cpu_temp()
+static const char *PIPE_ONE = "/tmp/pipeOne";
+
+static void read_cpu_temp_and_write(int fd)
 {
     FILE *file;
     char buffer[1024];
     char *temp_path = "/sys/class/thermal/thermal_zone0/temp";
 
     file = fopen(temp_path, "r");
-    if (file == NULL)
-    {
-        printf("Error opening file\n");
+    if (!file) {
+        perror("Failed to open CPU temp file");
         return;
     }
 
-    if (fgets(buffer, sizeof(buffer), file) != NULL)
-    {
+    if (fgets(buffer, sizeof(buffer), file) != NULL) {
         long temp = atol(buffer) / 1000;
-        char message[1024];
+        // z.B. "42\n" => 42° C
+        char message[128];
         snprintf(message, sizeof(message), "%ld", temp);
-        printf("CPU temperature: %ld C\n", temp); // todo: print message instead of temp?
 
-        // write pipe
-        const char *pOne = "/tmp/pipeOne";
-        int vOne = open(pOne, O_WRONLY);
-        if (vOne == -1)
-        {
-            perror("Failed to open pipe one in read_cpu_temp");
-            return;
+        // Schreiben, aber NICHT den FD schließen.
+        // Nur so viele Bytes schreiben, wie tatsächlich gebraucht werden.
+        ssize_t written = write(fd, message, strlen(message) + 1);
+        if (written < 0) {
+            perror("write to pipeOne");
+        } else {
+            printf("Wrote CPU temp: %s C\n", message);
         }
-        write(vOne, message, sizeof(message));
-        close(vOne);
+    } else {
+        fprintf(stderr, "Error reading CPU temp\n");
     }
-    else
-    {
-        printf("Error reading file\n");
-    }
+
     fclose(file);
 }
 
-int main(void) {
-    while (1) {
-      read_cpu_temp();
+int main(void)
+{
+    // Named Pipe einmal öffnen (Blockierend)
+    // Der mkfifo-Aufruf sollte idealerweise vorher im Setup passieren
+    // Falls sie nicht existiert, wird sie erzeugt
+    mkfifo(PIPE_ONE, 0666);
+    int pipeFd = open(PIPE_ONE, O_WRONLY);
+    if (pipeFd == -1) {
+        perror("Failed to open pipeOne for writing");
+        return 1;
     }
+
+    while (1) {
+        read_cpu_temp_and_write(pipeFd);
+        sleep(1);
+    }
+
+    // Nie erreicht im Beispiel, weil while(1)
+    close(pipeFd);
     return 0;
 }
