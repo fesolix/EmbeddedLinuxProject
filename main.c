@@ -9,6 +9,8 @@
 static const char *PIPE_ONE = "/tmp/pipeOne";
 static const char *PIPE_TWO = "/tmp/pipeTwo";
 
+static const char *CHAR_DEV = "/dev/packet_receiver";
+
 int main(void)
 {
     // mkfifo() nur ausführen, wenn die Pipes noch nicht existieren,
@@ -36,6 +38,16 @@ int main(void)
         return 1;
     }
 
+    // Open the char device for writing
+    int fdCharDev = open(CHAR_DEV, O_WRONLY);
+    if (fdCharDev == -1) {
+        perror("open /dev/packet_receiver");
+        close(fdOne);
+        close(fdTwo);
+        return 1;
+    }
+    printf("Opened %s for writing.\n", CHAR_DEV);
+    
     // Dauerhafte Lese-Schleife
     while (1) {
         char bufOne[128] = {0};
@@ -89,6 +101,21 @@ int main(void)
             }
             perror("read pipeTwo");
             break;
+        }
+
+        // ========= Write to char device =========
+        // Build a packet string. Adapt SENDER / IDs / values to your needs.
+        // Example: "SENDER=1 VID1=10 VAL1=<temp> VID2=11 VAL2=<freq>"
+        char transmitBuf[256] = {0};
+        snprintf(transmitBuf, sizeof(transmitBuf),
+                 "SENDER=1 VID1=10 VAL1=%s VID2=11 VAL2=%s",
+                 bufOne, bufTwo);
+
+        ssize_t written = write(fdCharDev, transmitBuf, strlen(transmitBuf));
+        if (written < 0) {
+            perror("write /dev/packet_receiver");
+        } else {
+            printf("Wrote packet to %s: %s\n", CHAR_DEV, transmitBuf);
         }
 
         // Kurze Pause, damit CPU-Last nicht durch
