@@ -7,12 +7,13 @@
 #include <errno.h>
 
 #define MAX_PROCESSES 10 
-#define PIPE_DIR "/tmp/"
+#define PIPE_DIR "/tmp/" //name von pipe ist jetzt gleich name von process
+// bsp.: /usr/local/bin/cpu_temp hat die pipe /tmp/cpu_freq
 #define PROCESS_MONITORING_DIR "/Processes/process_monitoring.sh" //bitte überprüfen ob das die richtige DIR ist
 
 typedef struct {
-    char name[256];
-    char pipe_path[256];
+    char name[256]; //processname
+    char pipe_path[256]; 
     int fd;
 } ProcessPipe;
 

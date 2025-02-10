@@ -5,7 +5,7 @@
 #include <fcntl.h>
 #include <string.h>
 
-static const char *PIPE_TWO = "/tmp/pipeTwo";
+static const char *PIPE_TWO = "/tmp/cpu_freq";
 
 static void read_cpu_freq_and_write(int fd)
 {
