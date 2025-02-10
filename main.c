@@ -60,7 +60,7 @@ void build_crc_checksum(char *package, size_t package_size) {
 
     char tmp[32];
     // z.B. " CRC=0x1A2B3C4D"
-    snprintf(tmp, sizeof(tmp), " CRC=0x%08lX", (unsigned long)c);
+    snprintf(tmp, sizeof(tmp), " CRC=0x%08lX", c);
 
     // ans package anhängen
     strncat(package, tmp, package_size - strlen(package) - 1);
@@ -70,7 +70,7 @@ void send_package(const char *package, const int fdCharDev) {
     char transmitBuf[256] = {0};
 
     // Kopiere Package in transmitBuf
-    snprintf(transmitBuf, sizeof(transmitBuf), package);
+    snprintf(transmitBuf, sizeof(transmitBuf), "%s", package);
 
     const ssize_t written = write(fdCharDev, transmitBuf, strlen(transmitBuf));
     if (written < 0) {
@@ -142,6 +142,7 @@ int main(const int argc, char *argv[]) {
                 return 1;
             }
         }
+        build_crc_checksum(package, sizeof(package));
 
         // Jetzt an /dev/packet_receiver schicken
         if (strlen(package) > 0) {

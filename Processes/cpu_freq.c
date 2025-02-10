@@ -5,7 +5,7 @@
 #include <fcntl.h>
 #include <string.h>
 
-static const char *PIPE_TWO = "/tmp/pipeTwo";
+static const char *PIPE_TWO = "/tmp/cpu_freq";
 
 static void read_cpu_freq_and_write(int fd)
 {
@@ -25,7 +25,7 @@ static void read_cpu_freq_and_write(int fd)
         char message[128];
         snprintf(message, sizeof(message), "%.3f", freq);
 
-        ssize_t written = write(fd, message, strlen(message) + 1);
+        ssize_t written = write(fd, message, strlen(message));
         if (written < 0) {
             perror("write to pipeTwo");
         } else {

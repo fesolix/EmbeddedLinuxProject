@@ -5,7 +5,7 @@
 #include <fcntl.h>
 #include <string.h>
 
-static const char *PIPE_ONE = "/tmp/pipeOne";
+static const char *PIPE_ONE = "/tmp/cpu_temp";
 
 static void read_cpu_temp_and_write(int fd)
 {
@@ -27,7 +27,7 @@ static void read_cpu_temp_and_write(int fd)
 
         // Schreiben, aber NICHT den FD schließen.
         // Nur so viele Bytes schreiben, wie tatsächlich gebraucht werden.
-        ssize_t written = write(fd, message, strlen(message) + 1);
+        ssize_t written = write(fd, message, strlen(message));
         if (written < 0) {
             perror("write to pipeOne");
         } else {
