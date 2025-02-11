@@ -14,7 +14,7 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Me :)");
 MODULE_DESCRIPTION("A kernel module to receive packets from userspace.");
 MODULE_VERSION("1.0");
-
+/*
 // Structure to hold our packet data
 struct packet_data {
     int sender_id;
@@ -23,9 +23,10 @@ struct packet_data {
     int value_id_2;
     int value_2;
 };
+*/
 
 // The size of the receive buffer
-#define RECV_BUF_SIZE 128
+#define RECV_BUF_SIZE 512
 
 // Global variables for device number, class, device.
 static dev_t dev_number;
@@ -79,31 +80,49 @@ static ssize_t packet_write(struct file *filp, const char __user *buf, size_t le
     // Ensure null-termination 
     recv_buffer[to_copy] = '\0';
 
-     // Placeholders for the fields:
+    /* // Placeholders for the fields:
     struct packet_data p_data;
     p_data.sender_id  = -1;
     p_data.value_id_1 = -1;
     p_data.value_1    = -1;
     p_data.value_id_2 = -1;
     p_data.value_2    = -1;
-
+*/
+    unsigned int sender_hex = 0;
+    int value_id_0 = -1, value_id_1 = -1;
+    char value_str_0[64] = {0};
+    char value_str_1[64] = {0};
+    unsigned long crc_val = 0;
+    
     // Example format:
     //   "SENDER=1 ID1=100 VAL1=222 ID2=101 VAL2=333"
     //   "SENDER=10 VID1=11 VAL1=100 VID2=12 VAL2=200"
-
+/*
     sscanf(recv_buffer, "SENDER=%d VID1=%d VAL1=%d VID2=%d VAL2=%d",
            &p_data.sender_id,
            &p_data.value_id_1,
            &p_data.value_1,
            &p_data.value_id_2,
            &p_data.value_2);
-
+*/
+    int matches = sscanf(recv_buffer,
+      "SENDER=0x%x VALUE_ID=%d VALUE=%63s VALUE_ID=%d VALUE=%63s CRC=0x%lx",
+       &sender_hex,
+       &value_id_0, value_str_0,
+       &value_id_1, value_str_1,
+       &crc_val);
     // Print the received packet data
-    printk(KERN_INFO "packet_receiver: Received packet -> "
-           "sender=%d, valID1=%d, val1=%d, valID2=%d, val2=%d\n",
+   /* printk(KERN_INFO "packet_receiver: Received packet -> "
+           "sender=0x%x, valID1=%d, val1=%d, valID2=%d, val2=%d\n",
            p_data.sender_id,
            p_data.value_id_1, p_data.value_1,
            p_data.value_id_2, p_data.value_2);
+*/
+    printk(KERN_INFO "packet_receiver: Parsed fields [matches=%d]:\n", matches);
+    printk(KERN_INFO "  sender=0x%X\n", sender_hex);
+    printk(KERN_INFO "  value_id_0=%d  value_0=\"%s\"\n", value_id_0, value_str_0);
+    printk(KERN_INFO "  value_id_1=%d  value_1=\"%s\"\n", value_id_1, value_str_1);
+    printk(KERN_INFO "  crc=0x%lX\n", crc_val);
 
     // Return the number of bytes written
     return len;
