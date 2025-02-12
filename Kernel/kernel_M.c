@@ -6,6 +6,7 @@
 #include <linux/cdev.h>       // For cdev
 #include <linux/device.h>     // For device_create, class_create
 #include <linux/slab.h>       // For kmalloc, kfree
+#include <linux/crc32.h>      // Include CRC32
 
 #define DEVICE_NAME "packet_receiver"
 #define CLASS_NAME  "packet_class"
@@ -50,6 +51,11 @@ static struct file_operations fops = {
     .write   = packet_write,
     .release = packet_release,  //not used
 };
+
+// CRC32 Calculation Function
+static u32 calculate_crc32(const char *data, size_t len) {
+    return crc32(0, data, len);
+}
 
 // ====================== Device Open ======================
 static int packet_open(struct inode *inode, struct file *file) {
@@ -123,6 +129,17 @@ static ssize_t packet_write(struct file *filp, const char __user *buf, size_t le
     printk(KERN_INFO "  value_id_0=%d  value_0=\"%s\"\n", value_id_0, value_str_0);
     printk(KERN_INFO "  value_id_1=%d  value_1=\"%s\"\n", value_id_1, value_str_1);
     printk(KERN_INFO "  crc=0x%lX\n", crc_val);
+
+    // Calculate CRC32 for the received data excluding the CRC field
+    size_t crc_len = strrchr(recv_buffer, 'C') - recv_buffer;
+    u32 calculated_crc = calculate_crc32(recv_buffer, crc_len);
+
+    if (calculated_crc == received_crc) {
+        printk(KERN_INFO "packet_receiver: CRC check passed!\n");
+    } else {
+        printk(KERN_ERR "packet_receiver: CRC mismatch! Expected: 0x%08X, Received: 0x%08lX\n",
+               calculated_crc, received_crc);
+    }
 
     // Return the number of bytes written
     return len;
