@@ -1,0 +1,11 @@
+[Unit]
+Description=Monitoring Processes and sending to character device
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/process_monitoring.sh /tmp/cpu_temp /tmp/cpu_freq
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

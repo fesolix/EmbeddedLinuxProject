@@ -5,127 +5,158 @@
 #include <fcntl.h>
 #include <string.h>
 #include <errno.h>
+#include <zlib.h>
 
-static const char *PIPE_ONE = "/tmp/pipeOne";
-static const char *PIPE_TWO = "/tmp/pipeTwo";
+// static const char *PIPE_ONE = "/tmp/pipeOne";
+// static const char *PIPE_TWO = "/tmp/pipeTwo";
 
 static const char *CHAR_DEV = "/dev/packet_receiver";
 
-int main(void)
-{
-    // mkfifo() nur ausführen, wenn die Pipes noch nicht existieren,
-    // bzw. Fehler ignorieren, falls schon existiert:
-    if (mkfifo(PIPE_ONE, 0666) < 0 && errno != EEXIST) {
-        perror("mkfifo pipeOne");
-        return 1;
+// static const char *SENDER_ID = "0x91";
+
+ssize_t read_pipe(int *fd, char *buf, size_t bufSize, const char *pipeName) {
+    // Alles mit 0 füllen, um es später einfach als String verarbeiten zu können.
+    memset(buf, 0, bufSize);
+
+    // Blocking read
+    ssize_t bytesRead = read(*fd, buf, bufSize - 1);
+    if (bytesRead > 0) {
+        // buf[bytesRead] = '\0'; // Schon durch memset garantiert
+        return bytesRead;
     }
-    if (mkfifo(PIPE_TWO, 0666) < 0 && errno != EEXIST) {
-        perror("mkfifo pipeTwo");
+    if (bytesRead == 0) {
+        // EOF -> Schreibseite geschlossen
+        printf("Pipe '%s' closed by writer. Reopening...\n", pipeName);
+        close(*fd);
+
+        // Neu öffnen (blockierend)
+        *fd = open(pipeName, O_RDONLY);
+        if (*fd == -1) {
+            perror("Reopen pipe");
+        }
+        // bytesRead = 0 bedeutet hier: wir haben keine Daten
+        return 0;
+    }
+
+    // Fehlerfall (bytesRead < 0)
+    perror("read pipe");
+    return -1;
+}
+
+void build_package(char *package, size_t package_size, const char *payload, int value_id) {
+    // Zwischenspeicher für die neue Komponente
+    char tmp[128];
+    // VALUE_ID=<id> VALUE=<payload>
+    snprintf(tmp, sizeof(tmp), " VALUE_ID=%d VALUE=%s", value_id, payload);
+
+    // Hänge tmp an package
+    strncat(package, tmp, package_size - strlen(package) - 1);
+}
+
+void build_crc_checksum(char *package, size_t package_size) {
+    // CRC berechnen
+    uLong c = crc32(0L, Z_NULL, 0);
+    c = crc32(c, (const Bytef*)package, strlen(package));
+
+    char tmp[32];
+    // z.B. " CRC=0x1A2B3C4D"
+    snprintf(tmp, sizeof(tmp), " CRC=0x%08lX", c);
+
+    // ans package anhängen
+    strncat(package, tmp, package_size - strlen(package) - 1);
+}
+
+void send_package(const char *package, const int fdCharDev) {
+    char transmitBuf[256] = {0};
+
+    // Kopiere Package in transmitBuf
+    snprintf(transmitBuf, sizeof(transmitBuf), "%s", package);
+
+    const ssize_t written = write(fdCharDev, transmitBuf, strlen(transmitBuf));
+    if (written < 0) {
+        perror("write /dev/packet_receiver");
+    } else {
+        printf("Wrote %ld bytes to %s\n", written, CHAR_DEV);
+    }
+}
+
+// argc = Anzahl Pipes *argv[] Pipe Pfade
+int main(const int argc, char *argv[]) {
+    const int num_pipes = argc - 1;
+
+    int *fds = calloc(num_pipes, sizeof(int));
+    if (!fds) {
+        perror("calloc fds");
         return 1;
     }
 
-    // Beide Pipes blockierend öffnen
-    int fdOne = open(PIPE_ONE, O_RDONLY);
-    if (fdOne == -1) {
-        perror("open pipeOne for reading");
-        return 1;
-    }
+    for (int i = 0; i < num_pipes; i++) {
+        const char *pipeName = argv[i + 1];
+        // mkfifo() nur ausführen, wenn die Pipes noch nicht existieren,
+        // bzw. Fehler ignorieren, falls schon existiert:
+        if (mkfifo(pipeName, 0666) < 0 && errno != EEXIST) {
+            perror("mkfifo pipe");
+            free(fds);
+            return 1;
+        }
 
-    int fdTwo = open(PIPE_TWO, O_RDONLY);
-    if (fdTwo == -1) {
-        perror("open pipeTwo for reading");
-        close(fdOne);
-        return 1;
+        // Pipes blockierend öffnen
+        fds[i] = open(pipeName, O_RDONLY);
+        if (fds[i] == -1) {
+            perror("open pipe for reading");
+            free(fds);
+            return 1;
+        }
     }
 
     // Open the char device for writing
-    int fdCharDev = open(CHAR_DEV, O_WRONLY);
+    const int fdCharDev = open(CHAR_DEV, O_WRONLY);
     if (fdCharDev == -1) {
         perror("open /dev/packet_receiver");
-        close(fdOne);
-        close(fdTwo);
+        // Aufräumen
+        for (int i = 0; i < num_pipes; i++) {
+            close(fds[i]);
+        }
+        free(fds);
         return 1;
     }
     printf("Opened %s for writing.\n", CHAR_DEV);
-    
+
     // Dauerhafte Lese-Schleife
     while (1) {
-        char bufOne[128] = {0};
-        char bufTwo[128] = {0};
+        char package[256];
+        snprintf(package, sizeof(package), "SENDER=0x91");
 
-        // =========== Lesevorgang PipeOne ===========
-        // read() kann blockieren, wenn noch keine Daten da sind,
-        // da wir blockierendes I/O verwenden.
-        // Wenn die Schreibseite offen bleibt, kommen periodisch neue Daten.
-        ssize_t bytesReadOne = read(fdOne, bufOne, sizeof(bufOne));
-        if (bytesReadOne > 0) {
-            // Gültige Daten -> ausgeben
-            printf("PipeOne CPU Temp: %s °C\n", bufOne);
-        } else if (bytesReadOne == 0) {
-            // EOF -> Schreibseite hat geschlossen
-            // -> ggf. Pipe erneut öffnen
-            printf("PipeOne closed by writer. Reopening...\n");
-            close(fdOne);
+        // Lese von jeder Pipe und ergänze das Package
+        for (int i = 0; i < num_pipes; i++) {
+            char pipeBuf[128];
 
-            // Neu öffnen
-            fdOne = open(PIPE_ONE, O_RDONLY);
-            if (fdOne == -1) {
-                perror("Reopen pipeOne");
-                break;  // oder return 1;
+            const ssize_t ret = read_pipe(&fds[i], pipeBuf, sizeof(pipeBuf), argv[i + 1]);
+            if (ret > 0) {
+                // ret Bytes gelesen in pipeBuf -> package anhängen
+                build_package(package, sizeof(package), pipeBuf, i);
+            } else if (ret == -1) {
+                // Fehler beim Lesen
+                fprintf(stderr, "Error reading from pipe\n");
+                free(fds);
+                return 1;
             }
-        } else {
-            // bytesReadOne < 0 => Fehler
-            if (errno == EINTR) {
-                // Signal unterbrochen, einfach weiter
-                continue;
-            }
-            perror("read pipeOne");
-            break; // oder return 1;
         }
+        build_crc_checksum(package, sizeof(package));
 
-        // =========== Lesevorgang PipeTwo ===========
-        ssize_t bytesReadTwo = read(fdTwo, bufTwo, sizeof(bufTwo));
-        if (bytesReadTwo > 0) {
-            printf("PipeTwo CPU Freq: %s GHz\n", bufTwo);
-        } else if (bytesReadTwo == 0) {
-            printf("PipeTwo closed by writer. Reopening...\n");
-            close(fdTwo);
-            fdTwo = open(PIPE_TWO, O_RDONLY);
-            if (fdTwo == -1) {
-                perror("Reopen pipeTwo");
-                break;
-            }
-        } else {
-            if (errno == EINTR) {
-                continue;
-            }
-            perror("read pipeTwo");
-            break;
-        }
-
-        // ========= Write to char device =========
-        // Build a packet string. Adapt SENDER / IDs / values to your needs.
-        // Example: "SENDER=1 VID1=10 VAL1=<temp> VID2=11 VAL2=<freq>"
-        char transmitBuf[256] = {0};
-        snprintf(transmitBuf, sizeof(transmitBuf),
-                 "SENDER=1 VID1=10 VAL1=%s VID2=11 VAL2=%s",
-                 bufOne, bufTwo);
-
-        ssize_t written = write(fdCharDev, transmitBuf, strlen(transmitBuf));
-        if (written < 0) {
-            perror("write /dev/packet_receiver");
-        } else {
-            printf("Wrote packet to %s: %s\n", CHAR_DEV, transmitBuf);
+        // Jetzt an /dev/packet_receiver schicken
+        if (strlen(package) > 0) {
+            send_package(package, fdCharDev);
         }
 
         // Kurze Pause, damit CPU-Last nicht durch
         // Dauerschleife hochgetrieben wird
         usleep(200000); // 200 ms
     }
-
     // Sollte man jemals aus der while(1)-Schleife ausbrechen:
-    close(fdOne);
-    close(fdTwo);
+    for (int i = 0; i < argc; i++) {
+        close(fds[i]);
+    }
 
     return 0;
 }
