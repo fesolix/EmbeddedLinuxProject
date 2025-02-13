@@ -1,30 +1,32 @@
 #include <linux/init.h>
 #include <linux/module.h>
+
 #include <linux/kernel.h>
 #include <linux/fs.h>         // For file_operations
 #include <linux/uaccess.h>    // For copy_from_user
 #include <linux/cdev.h>       // For cdev
 #include <linux/device.h>     // For device_create, class_create
 #include <linux/slab.h>       // For kmalloc, kfree
+
 #include <linux/crc32.h>      // Include CRC32
+
+#include <linux/gpio.h>      // GPIO support
+#include <linux/delay.h>     // Delay functions
+#include <linux/jiffies.h>   // Time measurement
+
+#include <linux/kthread.h>   // Kernel threads
+#include <linux/sched.h>     // Task scheduling
 
 #define DEVICE_NAME "packet_receiver"
 #define CLASS_NAME  "packet_class"
 
+#define GPIO_DATA 17  // GPIO for data transmission
+#define GPIO_CLOCK 27 // GPIO for clock control
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Me :)");
 MODULE_DESCRIPTION("A kernel module to receive packets from userspace.");
-MODULE_VERSION("1.0");
-/*
-// Structure to hold our packet data
-struct packet_data {
-    int sender_id;
-    int value_id_1;
-    int value_1;
-    int value_id_2;
-    int value_2;
-};
-*/
+MODULE_VERSION("1.7");
 
 // The size of the receive buffer
 #define RECV_BUF_SIZE 512
@@ -34,6 +36,15 @@ static dev_t dev_number;
 static struct class *packet_class = NULL;
 static struct cdev packet_cdev;
 
+// Store last valid data packet
+static char last_valid_packet[256] = {0}; 
+
+// Time of last transmission
+static struct task_struct *transmit_thread;
+
+// Flag to control loop in the thread
+static int keep_sending = 0;  
+
 // This buffer will temporarily store data from userspace
 static char *recv_buffer;
 
@@ -42,6 +53,8 @@ static int     packet_open(struct inode *inode, struct file *file);   //not used
 static int     packet_release(struct inode *inode, struct file *file);   //not used
 static ssize_t packet_read(struct file *filp, char __user *buf, size_t len, loff_t *offset);   //not used
 static ssize_t packet_write(struct file *filp, const char __user *buf, size_t len, loff_t *offset);
+static unsigned long calculate_crc32(const char *data, size_t len);
+static int transmit_loop(void *data); // Kernel thread function
 
 // File operations structure
 static struct file_operations fops = {
@@ -53,6 +66,7 @@ static struct file_operations fops = {
 };
 
 // CRC32 Calculation Function
+// uses the same polynomial as zlib’s standard CRC32
 static u32 calculate_crc32(const char *data, size_t len) {
     return crc32(0, data, len);
 }
@@ -60,6 +74,36 @@ static u32 calculate_crc32(const char *data, size_t len) {
 // ====================== Device Open ======================
 static int packet_open(struct inode *inode, struct file *file) {
     printk(KERN_INFO "packet_receiver: Device opened.\n");
+    return 0;
+}
+
+// ====================== Kernel Thread for Continuous Sending ======================
+static int transmit_loop(void *data) {
+    while (!kthread_should_stop()) {
+        if (keep_sending && strlen(last_valid_packet) > 0) {
+            // Wait for clock signal
+            if (gpio_get_value(GPIO_CLOCK) == 1) {
+                printk(KERN_INFO "packet_receiver: Clock HIGH -> Pausing transmission.\n");
+                msleep(100); // Small sleep to avoid busy looping
+                continue;
+            }
+
+            // Transmit the last valid packet
+            for (size_t i = 0; i < strlen(last_valid_packet); i++) {
+                gpio_set_value(GPIO_DATA, 1);
+                msleep(1);
+                gpio_set_value(GPIO_DATA, 0);
+                msleep(1);
+            }
+
+            printk(KERN_INFO "packet_receiver: Sent data to GPIO %d\n", GPIO_DATA);
+
+            // Wait 3x the transmission time before sending again
+            msleep(strlen(last_valid_packet) * 3);
+        } else {
+            msleep(100); // Wait if no valid packet
+        }
+    }
     return 0;
 }
 
@@ -86,60 +130,38 @@ static ssize_t packet_write(struct file *filp, const char __user *buf, size_t le
     // Ensure null-termination 
     recv_buffer[to_copy] = '\0';
 
-    /* // Placeholders for the fields:
-    struct packet_data p_data;
-    p_data.sender_id  = -1;
-    p_data.value_id_1 = -1;
-    p_data.value_1    = -1;
-    p_data.value_id_2 = -1;
-    p_data.value_2    = -1;
-*/
     unsigned int sender_hex = 0;
     int value_id_0 = -1, value_id_1 = -1;
     char value_str_0[64] = {0};
     char value_str_1[64] = {0};
     unsigned long crc_val = 0;
-    
-    // Example format:
-    //   "SENDER=1 ID1=100 VAL1=222 ID2=101 VAL2=333"
-    //   "SENDER=10 VID1=11 VAL1=100 VID2=12 VAL2=200"
-/*
-    sscanf(recv_buffer, "SENDER=%d VID1=%d VAL1=%d VID2=%d VAL2=%d",
-           &p_data.sender_id,
-           &p_data.value_id_1,
-           &p_data.value_1,
-           &p_data.value_id_2,
-           &p_data.value_2);
-*/
-    int matches = sscanf(recv_buffer,
-      "SENDER=0x%x VALUE_ID=%d VALUE=%63s VALUE_ID=%d VALUE=%63s CRC=0x%lx",
-       &sender_hex,
-       &value_id_0, value_str_0,
-       &value_id_1, value_str_1,
-       &crc_val);
-    // Print the received packet data
-   /* printk(KERN_INFO "packet_receiver: Received packet -> "
-           "sender=0x%x, valID1=%d, val1=%d, valID2=%d, val2=%d\n",
-           p_data.sender_id,
-           p_data.value_id_1, p_data.value_1,
-           p_data.value_id_2, p_data.value_2);
-*/
+
     printk(KERN_INFO "packet_receiver: Parsed fields [matches=%d]:\n", matches);
     printk(KERN_INFO "  sender=0x%X\n", sender_hex);
     printk(KERN_INFO "  value_id_0=%d  value_0=\"%s\"\n", value_id_0, value_str_0);
     printk(KERN_INFO "  value_id_1=%d  value_1=\"%s\"\n", value_id_1, value_str_1);
     printk(KERN_INFO "  crc=0x%lX\n", crc_val);
 
+    // Prepare the payload for CRC verification
+    char crc_buffer[256];
+    snprintf(crc_buffer, sizeof(crc_buffer), "SENDER=0x%x VALUE_ID=%d VALUE=%s VALUE_ID=%d VALUE=%s",
+        sender_hex, value_id_0, value_str_0, value_id_1, value_str_1);
+        
     // Calculate CRC32 for the received data excluding the CRC field
-    size_t crc_len = strrchr(recv_buffer, 'C') - recv_buffer;
-    u32 calculated_crc = calculate_crc32(recv_buffer, crc_len);
+    unsigned long computed_crc = calculate_crc32(crc_buffer, strlen(crc_buffer));
+    printk(KERN_INFO "  computed_crc=0x%lX\n", computed_crc);
 
-    if (calculated_crc == received_crc) {
-        printk(KERN_INFO "packet_receiver: CRC check passed!\n");
-    } else {
-        printk(KERN_ERR "packet_receiver: CRC mismatch! Expected: 0x%08X, Received: 0x%08lX\n",
-               calculated_crc, received_crc);
+    // Check CRC32 before transmission
+    if (computed_crc != crc_val) {
+        printk(KERN_ERR "packet_receiver: CRC32 mismatch! Data rejected.\n");
+        return -EIO;
     }
+
+    // Store the valid packet
+    strcpy(last_valid_packet, crc_buffer);
+    keep_sending = 1;
+
+    printk(KERN_INFO "packet_receiver: Sent data to GPIO %d\n", GPIO_DATA);
 
     // Return the number of bytes written
     return len;
@@ -205,16 +227,35 @@ static int __init packet_init(void) {
         return -ENOMEM;
     }
 
+    gpio_request(GPIO_DATA, "packet_data");
+    gpio_request(GPIO_CLOCK, "packet_clock");
+    gpio_direction_output(GPIO_DATA, 0);
+    gpio_direction_input(GPIO_CLOCK); // Clock is an input signal
+
+    // Start the transmission thread
+    transmit_thread = kthread_run(transmit_loop, NULL, "packet_transmitter");
+    if (IS_ERR(transmit_thread)) {
+        printk(KERN_ERR "packet_receiver: Failed to create transmit_thread.\n");
+        kfree(recv_buffer);
+        device_destroy(packet_class, dev_number);
+        class_destroy(packet_class);
+        cdev_del(&packet_cdev);
+        unregister_chrdev_region(dev_number, 1);
+        return PTR_ERR(transmit_thread);
+    }
+
     printk(KERN_INFO "packet_receiver: Module loaded.\n");
     return 0;
 }
 
 // ====================== Module Exit ======================
 static void __exit packet_exit(void) {
+
+    // Stop the transmission thread
+    kthread_stop(transmit_thread);
+
     // Free recv_buffer
-    if (recv_buffer) {
-        kfree(recv_buffer);
-    }
+    kfree(recv_buffer);
 
     // Remove device node
     device_destroy(packet_class, dev_number);
@@ -224,6 +265,9 @@ static void __exit packet_exit(void) {
     cdev_del(&packet_cdev);
     // Free device numbers
     unregister_chrdev_region(dev_number, 1);
+    // Free GPIOs
+    gpio_free(GPIO_DATA);
+    gpio_free(GPIO_CLOCK);
 
     printk(KERN_INFO "packet_receiver: Module unloaded.\n");
 }
