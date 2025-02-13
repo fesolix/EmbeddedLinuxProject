@@ -20,6 +20,7 @@
 #define DEVICE_NAME "packet_receiver"
 #define CLASS_NAME  "packet_class"
 
+// cat /sys/kernel/debug/gpio
 #define GPIO_DATA 17  // GPIO for data transmission
 #define GPIO_CLOCK 27 // GPIO for clock control
 
