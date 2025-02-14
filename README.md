@@ -1,6 +1,6 @@
 # Embedded Linux Projekt
 
-# Dieses Program kann beliebig viele Prozesse haben, welche dessen Daten über die GPIO sendet
+# Dieses Program ist mit beliebig viele Prozessen verbunden, welche dessen Daten über die GPIO sendet
 
 ## Architektur
 - Als Beispielprozesse werden die CPU Frequenz und Temperatur gemessen
