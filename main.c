@@ -1,3 +1,15 @@
+/*
+@file main.c
+@brief empfage daten von prozesse und senden an kernel
+@author Felix Mose, Christoph Schwierz
+@date 2025-02-14
+
+@details
+dieses Programm sucht nach prozessen und öffnet dessen zugehörige pipes
+er liest die Daten aus den Pipes, erstellt packages mit den daten und checksum 
+und sendet diese an den kernel mit einem character device interface
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

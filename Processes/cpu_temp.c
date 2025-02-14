@@ -1,3 +1,14 @@
+/*
+@file cpu_temp.c
+@brief cpu temperatur lesen und an pipe senden
+@author Felix Moser, Christoph Schwierz
+@date 2025-02-01
+
+@details
+dieses programm liest die temperatur aus thermal_zone0 der CPu aus
+und sendet den wert an seine zugehörige pipe
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

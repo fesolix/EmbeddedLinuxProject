@@ -1,3 +1,15 @@
+/*
+@file kernel_M.c
+@brief Kernel modul
+@author Alan Muhemad
+@date 2025-02-08
+
+@details
+creates character device for user space communication
+validates the package (CRC Checksum)
+timeslot management
+writes data to the GPIO
+*/
 #include <linux/init.h>
 #include <linux/module.h>
 

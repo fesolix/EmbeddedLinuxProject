@@ -1,3 +1,8 @@
+#file process_monitoring.sh
+#brief liste aller Prozesse die in ihre pipe writen
+#author Felix Moser, Alan Muhemad
+#date 2025-02-01
+
 #!/bin/bash
 
 #Prozesse starten

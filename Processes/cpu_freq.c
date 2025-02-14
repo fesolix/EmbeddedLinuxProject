@@ -1,3 +1,13 @@
+/*
+@file cpu_freq.c
+@brief cpu frequenz lesen und an pipe senden
+@author Felix Moser, Christoph Schwierz
+@date 2025-02-01
+
+@details
+dieses programm liest die CPU Frequenz aus cpu0 aus
+und sendet den wert an seine zugehörige pipe
+*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
