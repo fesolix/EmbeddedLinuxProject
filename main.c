@@ -7,111 +7,156 @@
 #include <errno.h>
 #include <zlib.h>
 
+// static const char *PIPE_ONE = "/tmp/pipeOne";
+// static const char *PIPE_TWO = "/tmp/pipeTwo";
 
-#define MAX_PROCESSES 10 
-#define PIPE_DIR "/tmp/" //name von pipe ist jetzt gleich name von process
-// bsp.: /usr/local/bin/cpu_temp hat die pipe /tmp/cpu_freq
-#define PROCESS_MONITORING_DIR "/Processes/process_monitoring.sh" //bitte überprüfen ob das die richtige DIR ist
+static const char *CHAR_DEV = "/dev/packet_receiver";
 
-typedef struct {
-    char name[256]; //processname
-    char pipe_path[256]; 
-    int fd;
-} ProcessPipe;
+// static const char *SENDER_ID = "0x91";
 
-ProcessPipe processes[MAX_PROCESSES]; //bis auf 10 prozesse skalierbar
-int process_count = 0;
+ssize_t read_pipe(int *fd, char *buf, size_t bufSize, const char *pipeName) {
+    // Alles mit 0 füllen, um es später einfach als String verarbeiten zu können.
+    memset(buf, 0, bufSize);
 
-void scan_processes() {
-    FILE *file = fopen(PROCESS_MONITORING_DIR, "r");//file öffnen
-    if (!file) {
-        perror("Could not open process file");
-        exit(EXIT_FAILURE); //break; oder return 1; ?
+    // Blocking read
+    ssize_t bytesRead = read(*fd, buf, bufSize - 1);
+    if (bytesRead > 0) {
+        // buf[bytesRead] = '\0'; // Schon durch memset garantiert
+        return bytesRead;
     }
+    if (bytesRead == 0) {
+        // EOF -> Schreibseite geschlossen
+        printf("Pipe '%s' closed by writer. Reopening...\n", pipeName);
+        close(*fd);
 
-    char line[512];
-    while (fgets(line, sizeof(line), file) && process_count < MAX_PROCESSES) {
-        if (strncmp(line, "/usr/local/bin/", 15) == 0) {//zeilenweise nach prozessen suchen
-            char *newline = strchr(line, '\n');
-            if (newline) {
-                *newline = '\0';
-            }
-            //prozess in dateistruktur schreiben
-            snprintf(processes[process_count].name, sizeof(processes[process_count].name), "%s", strrchr(line, '/') + 1);
-            snprintf(processes[process_count].pipe_path, sizeof(processes[process_count].pipe_path), "%s%s", PIPE_DIR, processes[process_count].name);
-            // mkfifo() nur ausführen, wenn die Pipes noch nicht existieren,
-            // bzw. Fehler ignorieren, falls schon existiert:
-            if (mkfifo(processes[process_count].pipe_path, 0666) < 0 && errno != EEXIST) {//mkfifo machen
-                perror("mkfifo failed");
-                exit(EXIT_FAILURE);
-            }
-            process_count++;
+        // Neu öffnen (blockierend)
+        *fd = open(pipeName, O_RDONLY);
+        if (*fd == -1) {
+            perror("Reopen pipe");
         }
+        // bytesRead = 0 bedeutet hier: wir haben keine Daten
+        return 0;
     }
-    fclose(file);
+
+    // Fehlerfall (bytesRead < 0)
+    perror("read pipe");
+    return -1;
 }
 
-void open_pipes() {//pipe blockierend öffnen
-    for (int i = 0; i < process_count; i++) {
-        processes[i].fd = open(processes[i].pipe_path, O_RDONLY);
-        if (processes[i].fd == -1) {
-            perror("Error opening pipe");
-            exit(EXIT_FAILURE);
-        }
+void build_package(char *package, size_t package_size, const char *payload, int value_id) {
+    // Zwischenspeicher für die neue Komponente
+    char tmp[128];
+    // VALUE_ID=<id> VALUE=<payload>
+    snprintf(tmp, sizeof(tmp), " VALUE_ID=%d VALUE=%s", value_id, payload);
+
+    // Hänge tmp an package
+    strncat(package, tmp, package_size - strlen(package) - 1);
+}
+
+void build_crc_checksum(char *package, size_t package_size) {
+    // CRC berechnen
+    uLong c = crc32(0L, Z_NULL, 0);
+    c = crc32(c, (const Bytef*)package, strlen(package));
+
+    char tmp[32];
+    // z.B. " CRC=0x1A2B3C4D"
+    snprintf(tmp, sizeof(tmp), " CRC=0x%08lX", c);
+
+    // ans package anhängen
+    strncat(package, tmp, package_size - strlen(package) - 1);
+}
+
+void send_package(const char *package, const int fdCharDev) {
+    char transmitBuf[256] = {0};
+
+    // Kopiere Package in transmitBuf
+    snprintf(transmitBuf, sizeof(transmitBuf), "%s", package);
+
+    const ssize_t written = write(fdCharDev, transmitBuf, strlen(transmitBuf));
+    if (written < 0) {
+        perror("write /dev/packet_receiver");
+    } else {
+        printf("Wrote %ld bytes to %s\n", written, CHAR_DEV);
     }
 }
 
-void read_pipes() {
-    while (1) {//alle pipes in dauerschlife nacheinander lesen
-        for (int i = 0; i < process_count; i++) {
-            char buffer[128] = {0};
-            // read() kann blockieren, wenn noch keine Daten da sind,
-            // da wir blockierendes I/O verwenden.
-            // Wenn die Schreibseite offen bleibt, kommen periodisch neue Daten.
-            ssize_t bytes_read = read(processes[i].fd, buffer, sizeof(buffer));
-            if (bytes_read > 0) {
-                // Gültige Daten -> ausgeben
-                printf("%s: %s\n", processes[i].name, buffer);
-            } else if (bytes_read == 0) {
-                // EOF -> Schreibseite hat geschlossen
-                // -> ggf. Pipe erneut öffnen
-                printf("%s closed, reopening...\n", processes[i].name);
-                close(processes[i].fd);
-                processes[i].fd = open(processes[i].pipe_path, O_RDONLY);
-                if (processes[i].fd == -1) {
-                    perror("Reopen pipe");
-                    exit(EXIT_FAILURE);
-                }
-            } else {
-                // bytesReadOne < 0 => Fehler
-                if (errno == EINTR) {
-                    // Signal unterbrochen, einfach weiter
-                    continue;
-                }
-                perror("read error");
-                exit(EXIT_FAILURE);
+// argc = Anzahl Pipes *argv[] Pipe Pfade
+int main(const int argc, char *argv[]) {
+    const int num_pipes = argc - 1;
+
+    int *fds = calloc(num_pipes, sizeof(int));
+    if (!fds) {
+        perror("calloc fds");
+        return 1;
+    }
+
+    for (int i = 0; i < num_pipes; i++) {
+        const char *pipeName = argv[i + 1];
+        // mkfifo() nur ausführen, wenn die Pipes noch nicht existieren,
+        // bzw. Fehler ignorieren, falls schon existiert:
+        if (mkfifo(pipeName, 0666) < 0 && errno != EEXIST) {
+            perror("mkfifo pipe");
+            free(fds);
+            return 1;
+        }
+
+        // Pipes blockierend öffnen
+        fds[i] = open(pipeName, O_RDONLY);
+        if (fds[i] == -1) {
+            perror("open pipe for reading");
+            free(fds);
+            return 1;
+        }
+    }
+
+    // Open the char device for writing
+    const int fdCharDev = open(CHAR_DEV, O_WRONLY);
+    if (fdCharDev == -1) {
+        perror("open /dev/packet_receiver");
+        // Aufräumen
+        for (int i = 0; i < num_pipes; i++) {
+            close(fds[i]);
+        }
+        free(fds);
+        return 1;
+    }
+    printf("Opened %s for writing.\n", CHAR_DEV);
+
+    // Dauerhafte Lese-Schleife
+    while (1) {
+        char package[256];
+        snprintf(package, sizeof(package), "SENDER=0x91");
+
+        // Lese von jeder Pipe und ergänze das Package
+        for (int i = 0; i < num_pipes; i++) {
+            char pipeBuf[128];
+
+            const ssize_t ret = read_pipe(&fds[i], pipeBuf, sizeof(pipeBuf), argv[i + 1]);
+            if (ret > 0) {
+                // ret Bytes gelesen in pipeBuf -> package anhängen
+                build_package(package, sizeof(package), pipeBuf, i);
+            } else if (ret == -1) {
+                // Fehler beim Lesen
+                fprintf(stderr, "Error reading from pipe\n");
+                free(fds);
+                return 1;
             }
         }
+        build_crc_checksum(package, sizeof(package));
+
+        // Jetzt an /dev/packet_receiver schicken
+        if (strlen(package) > 0) {
+            send_package(package, fdCharDev);
+        }
+
         // Kurze Pause, damit CPU-Last nicht durch
         // Dauerschleife hochgetrieben wird
-        usleep(200000);//20ms
+        usleep(200000); // 200 ms
     }
     // Sollte man jemals aus der while(1)-Schleife ausbrechen:
-    close_pipes();
-}
-
-void close_pipes() {//braucht man das?
-    for (int i = 0; i < process_count; i++) {
-        close(processes[i].fd);
+    for (int i = 0; i < argc; i++) {
+        close(fds[i]);
     }
-    return;
-}
 
-int main() {
-    scan_processes();
-    open_pipes();
-    read_pipes();
     return 0;
 }
-
-
